@@ -1,23 +1,19 @@
-"""Chat logic: search documents, build prompt, stream response."""
+"""Chat logic: delegates to LangGraph RAG pipeline."""
 
 from typing import Generator
-from openai import OpenAI
-from lib.rag_chain import search_relevant_documents, build_rag_prompt
+
+from lib.graph import stream_response, stream_response_with_sources
 
 
-def generate_response(question: str) -> Generator[str, None, None]:
-    """Search relevant docs and stream GPT-4o-mini response."""
-    result = search_relevant_documents(question)
-    messages = build_rag_prompt(question=question, context=result["context"])
+def generate_response(
+    question: str, history: list[dict[str, str]] | None = None
+) -> Generator[str, None, None]:
+    """Stream GPT-4o-mini response using LangGraph RAG pipeline."""
+    yield from stream_response(question, history or [])
 
-    client = OpenAI()
-    stream = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0,
-        stream=True,
-    )
 
-    for chunk in stream:
-        if chunk.choices and chunk.choices[0].delta.content:
-            yield chunk.choices[0].delta.content
+def generate_response_with_sources(
+    question: str, history: list[dict[str, str]] | None = None
+) -> tuple[Generator[str, None, None], list]:
+    """Stream response and return sources for UI display."""
+    return stream_response_with_sources(question, history or [])

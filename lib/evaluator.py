@@ -38,23 +38,33 @@ def run_single_eval(question: str, ground_truth: str) -> dict:
     }
 
 
-def calc_faithfulness_simple(answer: str, context: str) -> float:
-    """Calculate simple faithfulness score based on word overlap.
+def _make_bigrams(text: str) -> set[str]:
+    """Generate character bigram set after removing punctuation and whitespace."""
+    import re
 
-    Measures what fraction of words in the answer appear in the context.
+    cleaned = re.sub(r"[\s。、．，.,!！?？「」『』（）()・\-―～：:；;]", "", text)
+    if len(cleaned) < 2:
+        return set(cleaned)
+    return {cleaned[i : i + 2] for i in range(len(cleaned) - 1)}
+
+
+def calc_faithfulness_simple(answer: str, context: str) -> float:
+    """Calculate simple faithfulness score based on character bigram overlap.
+
+    Measures what fraction of bigrams in the answer appear in the context.
     Higher score = more faithful (less hallucination).
     """
     if not answer or not context:
         return 0.0
 
-    answer_words = set(answer)
-    context_words = set(context)
+    answer_bigrams = _make_bigrams(answer)
+    context_bigrams = _make_bigrams(context)
 
-    if not answer_words:
+    if not answer_bigrams:
         return 0.0
 
-    overlap = answer_words & context_words
-    return len(overlap) / len(answer_words)
+    overlap = answer_bigrams & context_bigrams
+    return len(overlap) / len(answer_bigrams)
 
 
 def calc_faithfulness_llm(answer: str, context: str) -> float:

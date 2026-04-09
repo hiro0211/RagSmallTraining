@@ -5,7 +5,10 @@ import sys
 from pathlib import Path
 
 from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import (
+    MarkdownHeaderTextSplitter,
+    RecursiveCharacterTextSplitter,
+)
 from langchain_openai import OpenAIEmbeddings
 
 from lib.supabase_client import get_supabase_admin
@@ -51,22 +54,57 @@ def load_documents(directory: str) -> list[Document]:
 
 
 def chunk_documents(docs: list[Document]) -> list[Document]:
-    """Split documents into chunks using Japanese-aware separators."""
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
+    """Split documents into chunks.
+
+    For Markdown (.md): 2-stage split using headers first, then size.
+    For other formats: size-based split only.
+    """
+    size_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=100,
         separators=["\n\n", "\n", "。", ".", " ", ""],
     )
+    md_header_splitter = MarkdownHeaderTextSplitter(
+        headers_to_split_on=[("#", "h1"), ("##", "h2")],
+        strip_headers=False,
+    )
+
     chunks: list[Document] = []
     for doc in docs:
-        splits = splitter.split_text(doc.page_content)
-        for i, text in enumerate(splits):
-            chunks.append(
-                Document(
-                    page_content=text,
-                    metadata={**doc.metadata, "chunk_index": i},
+        is_markdown = doc.metadata.get("type") == "md"
+
+        if is_markdown:
+            # Stage 1: split by Markdown headers
+            header_splits = md_header_splitter.split_text(doc.page_content)
+            # Stage 2: split each section by size
+            for section_doc in header_splits:
+                section_name = (
+                    section_doc.metadata.get("h2")
+                    or section_doc.metadata.get("h1")
+                    or ""
                 )
-            )
+                size_splits = size_splitter.split_text(section_doc.page_content)
+                for i, text in enumerate(size_splits):
+                    chunks.append(
+                        Document(
+                            page_content=text,
+                            metadata={
+                                **doc.metadata,
+                                "chunk_index": len(chunks),
+                                "section": section_name,
+                            },
+                        )
+                    )
+        else:
+            # Non-markdown: size-based split only
+            splits = size_splitter.split_text(doc.page_content)
+            for i, text in enumerate(splits):
+                chunks.append(
+                    Document(
+                        page_content=text,
+                        metadata={**doc.metadata, "chunk_index": i},
+                    )
+                )
     return chunks
 
 

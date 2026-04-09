@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS documents (
 -- 3. ベクトル類似検索用 RPC 関数
 CREATE OR REPLACE FUNCTION match_documents(
   query_embedding vector(1536),
-  match_threshold float DEFAULT 0.7,
+  match_threshold float DEFAULT 0.5,
   match_count int DEFAULT 5
 )
 RETURNS TABLE (
@@ -65,3 +65,44 @@ CREATE POLICY "Anon read access"
   FOR SELECT
   TO anon
   USING (true);
+
+-- =============================================
+-- チャットセッション管理テーブル
+-- =============================================
+
+-- 6. chat_sessions テーブル
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title text NOT NULL DEFAULT '新しい会話',
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+-- 7. chat_messages テーブル
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  session_id uuid NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+  role text NOT NULL CHECK (role IN ('user', 'assistant')),
+  content text NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+
+-- 8. メッセージ検索用インデックス
+CREATE INDEX IF NOT EXISTS chat_messages_session_idx
+  ON chat_messages(session_id, created_at);
+
+-- 9. RLS ポリシー（チャットテーブル）
+ALTER TABLE chat_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Service role full access"
+  ON chat_sessions
+  FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "Service role full access"
+  ON chat_messages
+  FOR ALL
+  USING (true)
+  WITH CHECK (true);

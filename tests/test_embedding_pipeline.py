@@ -59,7 +59,7 @@ class TestChunkDocuments:
         chunks = chunk_documents([doc])
         assert len(chunks) > 1
         for chunk in chunks:
-            assert len(chunk.page_content) <= 1000
+            assert len(chunk.page_content) <= 500
 
     def test_preserves_metadata(self):
         from lib.embedding_pipeline import chunk_documents
@@ -80,6 +80,51 @@ class TestChunkDocuments:
         doc = Document(page_content=text, metadata={"source": "test.md"})
         chunks = chunk_documents([doc])
         assert len(chunks) >= 2
+
+    def test_markdown_splits_by_headers(self):
+        from lib.embedding_pipeline import chunk_documents
+        from langchain_core.documents import Document
+
+        md = "# セクション1\nセクション1の内容です。\n\n## セクション2\nセクション2の内容です。\n\n## セクション3\nセクション3の内容です。"
+        doc = Document(page_content=md, metadata={"source": "test.md", "type": "md"})
+        chunks = chunk_documents([doc])
+        assert len(chunks) == 3
+
+    def test_markdown_chunks_have_section_metadata(self):
+        from lib.embedding_pipeline import chunk_documents
+        from langchain_core.documents import Document
+
+        md = "# タイトル\n本文の内容\n\n## サブセクション\nサブの内容"
+        doc = Document(page_content=md, metadata={"source": "test.md", "type": "md"})
+        chunks = chunk_documents([doc])
+        for chunk in chunks:
+            assert "section" in chunk.metadata
+
+    def test_non_markdown_uses_size_splitter_only(self):
+        from lib.embedding_pipeline import chunk_documents
+        from langchain_core.documents import Document
+
+        doc = Document(
+            page_content="あ" * 1000,
+            metadata={"source": "test.txt", "type": "txt"},
+        )
+        chunks = chunk_documents([doc])
+        assert len(chunks) >= 2
+        # txt should NOT have section metadata
+        for chunk in chunks:
+            assert "section" not in chunk.metadata
+
+    def test_chunk_size_is_500(self):
+        from lib.embedding_pipeline import chunk_documents
+        from langchain_core.documents import Document
+
+        doc = Document(
+            page_content="あ" * 2000,
+            metadata={"source": "test.txt", "type": "txt"},
+        )
+        chunks = chunk_documents([doc])
+        for chunk in chunks:
+            assert len(chunk.page_content) <= 500
 
 
 class TestGenerateEmbeddings:

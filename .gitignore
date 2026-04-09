@@ -24,5 +24,8 @@ htmlcov/
 .vscode/
 .idea/
 
+# MCP
+.mcp.json
+
 # uv
 uv.lock

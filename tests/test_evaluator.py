@@ -68,6 +68,23 @@ class TestCalcFaithfulness:
         assert score < 0.5  # Low faithfulness
 
 
+class TestBigramFaithfulness:
+    def test_identical_text_returns_1(self):
+        from lib.evaluator import calc_faithfulness_simple
+
+        text = "RAGとは検索拡張生成のことです。"
+        score = calc_faithfulness_simple(text, text)
+        assert score == 1.0
+
+    def test_unrelated_text_returns_low(self):
+        from lib.evaluator import calc_faithfulness_simple
+
+        context = "RAGとは検索拡張生成のことです。"
+        answer = "今日は晴れで気温は25度になるでしょう。"
+        score = calc_faithfulness_simple(answer, context)
+        assert score < 0.3
+
+
 class TestFormatReport:
     def test_format_report(self):
         from lib.evaluator import format_report
