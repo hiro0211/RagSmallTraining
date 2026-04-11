@@ -9,7 +9,7 @@
 ## 2. Supabase プロジェクト作成
 1. https://supabase.com にアクセス（GitHub アカウントでサインアップ可）
 2. 「New Project」をクリック
-3. プロジェクト名: `rag-small`（任意）、リージョン: `Northeast Asia (Tokyo)` 推奨
+3. プロジェクト名: `RagSmallTraining`（任意）、リージョン: `Northeast Asia (Tokyo)` 推奨
 4. データベースパスワードを設定して「Create new project」
 5. プロジェクト作成完了後、以下をメモ:
    - **Project URL:** Settings → API → Project URL

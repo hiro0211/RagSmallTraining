@@ -1,7 +1,7 @@
 [project]
-name = "rag-small"
+name = "rag-small-training"
 version = "0.1.0"
-description = "RAG Small - 社内RAGシステムのスモール版再現"
+description = "RagSmallTraining - 社内RAGシステムの学習用スモール版"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

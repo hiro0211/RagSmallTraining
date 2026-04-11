@@ -56,7 +56,7 @@ Next.jsプロジェクトを初期化してください。
   SUPABASE_ANON_KEY=
   SUPABASE_SERVICE_ROLE_KEY=
 
-プロジェクト名: rag-small
+プロジェクト名: RagSmallTraining
 ```
 
 ---
@@ -277,7 +277,7 @@ Vercelにデプロイしてください。
 ## ディレクトリ構成（完成イメージ）
 
 ```
-rag-small/
+RagSmallTraining/
 ├── docs/                          # RAG対象ドキュメント
 │   └── test.md
 ├── src/
