@@ -106,3 +106,49 @@ CREATE POLICY "Service role full access"
   FOR ALL
   USING (true)
   WITH CHECK (true);
+
+-- =============================================
+-- ハイブリッド検索（ベクトル + キーワード全文検索）
+-- =============================================
+
+-- 10. GIN インデックス（全文検索用）
+CREATE INDEX IF NOT EXISTS documents_content_tsvector_idx
+  ON documents
+  USING gin (to_tsvector('simple', content));
+
+-- 11. ハイブリッド検索 RPC 関数
+CREATE OR REPLACE FUNCTION match_documents_hybrid(
+  query_embedding vector(1536),
+  query_text text,
+  match_threshold float DEFAULT 0.3,
+  match_count int DEFAULT 5,
+  vector_weight float DEFAULT 0.7,
+  keyword_weight float DEFAULT 0.3
+)
+RETURNS TABLE (
+  id bigint,
+  content text,
+  metadata jsonb,
+  similarity float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    d.id,
+    d.content,
+    d.metadata,
+    (
+      vector_weight * (1 - (d.embedding <=> query_embedding))
+      + keyword_weight * ts_rank(
+          to_tsvector('simple', d.content),
+          plainto_tsquery('simple', query_text)
+        )
+    )::float AS similarity
+  FROM documents d
+  WHERE (1 - (d.embedding <=> query_embedding)) > match_threshold
+  ORDER BY similarity DESC
+  LIMIT match_count;
+END;
+$$;

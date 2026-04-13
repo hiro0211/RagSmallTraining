@@ -43,22 +43,37 @@ def search_relevant_documents(
     question: str,
     match_threshold: float = 0.3,
     match_count: int = 5,
+    use_hybrid: bool = True,
 ) -> dict:
-    """Search for relevant documents using vector similarity."""
+    """Search for relevant documents using vector similarity or hybrid search."""
     embeddings = _get_embeddings()
     query_embedding = embeddings.embed_query(question)
 
     supabase = get_supabase_admin()
-    result = (
-        supabase.rpc(
-            "match_documents",
-            {
-                "query_embedding": query_embedding,
-                "match_threshold": match_threshold,
-                "match_count": match_count,
-            },
-        ).execute()
-    )
+
+    if use_hybrid:
+        result = (
+            supabase.rpc(
+                "match_documents_hybrid",
+                {
+                    "query_embedding": query_embedding,
+                    "query_text": question,
+                    "match_threshold": match_threshold,
+                    "match_count": match_count,
+                },
+            ).execute()
+        )
+    else:
+        result = (
+            supabase.rpc(
+                "match_documents",
+                {
+                    "query_embedding": query_embedding,
+                    "match_threshold": match_threshold,
+                    "match_count": match_count,
+                },
+            ).execute()
+        )
 
     docs = result.data or []
 

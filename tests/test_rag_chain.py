@@ -155,6 +155,85 @@ class TestContextSourceLabels:
             assert "[出典2:" in result["context"]
 
 
+class TestHybridSearch:
+    """Tests for hybrid search (use_hybrid parameter)."""
+
+    def test_hybrid_search_calls_hybrid_rpc(self):
+        with (
+            patch("lib.rag_chain.OpenAIEmbeddings") as MockEmbed,
+            patch("lib.rag_chain.get_supabase_admin") as mock_admin,
+        ):
+            MockEmbed.return_value.embed_query.return_value = [0.1] * 1536
+            mock_rpc = MagicMock()
+            mock_rpc.execute.return_value.data = []
+            mock_admin.return_value.rpc.return_value = mock_rpc
+
+            from lib.rag_chain import search_relevant_documents
+
+            search_relevant_documents("Supabaseとは", use_hybrid=True)
+
+            rpc_name = mock_admin.return_value.rpc.call_args[0][0]
+            assert rpc_name == "match_documents_hybrid"
+
+    def test_hybrid_search_passes_query_text(self):
+        with (
+            patch("lib.rag_chain.OpenAIEmbeddings") as MockEmbed,
+            patch("lib.rag_chain.get_supabase_admin") as mock_admin,
+        ):
+            MockEmbed.return_value.embed_query.return_value = [0.1] * 1536
+            mock_rpc = MagicMock()
+            mock_rpc.execute.return_value.data = []
+            mock_admin.return_value.rpc.return_value = mock_rpc
+
+            from lib.rag_chain import search_relevant_documents
+
+            search_relevant_documents("pgvectorの使い方", use_hybrid=True)
+
+            params = mock_admin.return_value.rpc.call_args[0][1]
+            assert params["query_text"] == "pgvectorの使い方"
+
+    def test_non_hybrid_search_calls_original_rpc(self):
+        with (
+            patch("lib.rag_chain.OpenAIEmbeddings") as MockEmbed,
+            patch("lib.rag_chain.get_supabase_admin") as mock_admin,
+        ):
+            MockEmbed.return_value.embed_query.return_value = [0.1] * 1536
+            mock_rpc = MagicMock()
+            mock_rpc.execute.return_value.data = []
+            mock_admin.return_value.rpc.return_value = mock_rpc
+
+            from lib.rag_chain import search_relevant_documents
+
+            search_relevant_documents("テスト", use_hybrid=False)
+
+            rpc_name = mock_admin.return_value.rpc.call_args[0][0]
+            assert rpc_name == "match_documents"
+
+    def test_hybrid_search_returns_combined_score(self):
+        with (
+            patch("lib.rag_chain.OpenAIEmbeddings") as MockEmbed,
+            patch("lib.rag_chain.get_supabase_admin") as mock_admin,
+        ):
+            MockEmbed.return_value.embed_query.return_value = [0.1] * 1536
+            mock_rpc = MagicMock()
+            mock_rpc.execute.return_value.data = [
+                {
+                    "id": 1,
+                    "content": "ハイブリッド検索の結果",
+                    "metadata": {"source": "test.md"},
+                    "similarity": 0.85,
+                },
+            ]
+            mock_admin.return_value.rpc.return_value = mock_rpc
+
+            from lib.rag_chain import search_relevant_documents
+
+            result = search_relevant_documents("Supabase", use_hybrid=True)
+
+            assert len(result["sources"]) == 1
+            assert result["sources"][0].similarity == 0.85
+
+
 class TestEmbeddingsCache:
     """Tests for _get_embeddings() caching."""
 
