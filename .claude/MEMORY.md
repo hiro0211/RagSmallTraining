@@ -93,3 +93,69 @@ TDD 厳守（Red → Green）、全85テストパス、カバレッジ 90.75%。
 - `supabase-setup.sql` - `match_documents` default 0.3
 - `tests/test_rag_chain.py` - `test_default_threshold_is_0_3`, `test_prompt_allows_flexible_interpretation`
 - `tests/test_graph.py` - `TestRewriteQueryNode`, `TestRetrieveUsesRewrittenQuery`, `TestGraphTopology` 追加、`TestStreamResponse` の sources テストを `create_llm` モック対応
+
+## 2026-04-11 応答速度最適化（二重実行解消・グラフキャッシュ・rewriteスキップ）
+
+### 作業内容
+TDD（Red→Green）で3つの最適化を実施：
+
+1. **二重実行の解消（最重要）**: `stream_response_with_sources` を `graph.stream` 1回実行に変更
+   - 旧: LLM rewrite + DB検索（1回目）→ `stream_response` 内でグラフ全実行（2回目）
+   - 新: `stream_mode=["messages", "updates"]` で1回のgraph.streamから sources（retrieveノードのupdates）とトークン（generateノードのmessages）を同時取得
+   - `sources` リストはクロージャ経由でmutableに共有、generator消費後に呼び元で参照可能
+
+2. **グラフのモジュールレベルキャッシュ**: `get_compiled_graph()` 追加
+   - `_compiled_graph = None` モジュールレベル変数でキャッシュ
+   - `stream_response` / `stream_response_with_sources` 両方で使用
+   - `build_rag_graph()` はプロセス起動時に1回だけ呼ばれる
+
+3. **`rewrite_query` の条件付きスキップ**: 明確な質問ではLLM呼び出しをスキップ
+   - 条件: `len(question) >= 10` かつ `？/? /ですか/でしょうか` のいずれかを含む
+   - 短い・曖昧・略語質問（べくとる、ラグって何ですか等）は引き続きLLMでリライト
+
+### テスト
+- 新規12テスト追加（`TestGetCompiledGraph`, `TestRewriteQuerySkip`, `TestStreamResponseWithSourcesSingleGraph`）
+- 既存 `TestStreamResponse` の `@patch("lib.graph.build_rag_graph")` を `get_compiled_graph` に更新
+- 旧 `stream_response_with_sources` テスト2本を削除（実装変更に合わせて新しいクラスに置換）
+- 全97テストパス、カバレッジ 91.19%（lib/graph.py 100%）
+
+### 変更ファイル
+- `lib/graph.py` - `_compiled_graph`, `get_compiled_graph()`, `rewrite_query` スキップ条件, `stream_response_with_sources` 全面書き直し, `stream_response` の `build_rag_graph()` → `get_compiled_graph()`
+- `tests/test_graph.py` - 上記テスト追加・更新
+- `pyproject.toml` - pytest-cov 追加（開発依存）
+
+## 2026-04-13 プロンプト優先順位改善 + 応答速度最適化 + ハイブリッド検索
+
+### 作業内容
+1. **プロンプト優先順位改善**: `RAG_SYSTEM_PROMPT` を3段階優先順位に変更、【ナレッジベース】/【一般知識】マーカー追加、拒否メッセージ削除
+2. **応答速度最適化**: `get_compiled_graph()`, `create_llm()`, `_get_embeddings()` に `@lru_cache` 追加、`stream_response_with_sources()` を単一グラフ実行に書き直し
+3. **ハイブリッド検索**: `search_relevant_documents()` に `use_hybrid` パラメータ追加（デフォルトTrue）、`match_documents_hybrid` SQL関数追加（ベクトル + キーワード全文検索の組み合わせスコア）
+
+### テスト
+- 全98テストパス、カバレッジ 91.36%
+- `TestHybridSearch` 4テスト追加（hybrid_rpc呼び出し、query_text渡し、非hybrid時の既存RPC、combined_score）
+
+### 変更ファイル
+- `lib/rag_chain.py` - `use_hybrid` パラメータ追加、`_get_embeddings()` キャッシュ、プロンプト改善
+- `lib/graph.py` - `get_compiled_graph()` キャッシュ、`stream_response_with_sources` 書き直し
+- `lib/llm.py` - `create_llm()` キャッシュ
+- `supabase-setup.sql` - `match_documents_hybrid` 関数 + GIN インデックス追加
+- `tests/test_rag_chain.py` - `TestHybridSearch` + プロンプト関連テスト追加
+- `tests/test_graph.py` - `TestGetCompiledGraph` + sources テスト更新
+- `tests/conftest.py` - `clear_lru_caches` fixture 追加
+
+### ユーザー対応事項
+- ~~`supabase-setup.sql` の新しい部分（セクション10, 11）を Supabase SQL Editor で実行する必要あり~~ → Supabase MCP で適用済み
+
+## 2026-04-13 match_documents_hybrid DB migration適用
+
+### 作業内容
+- Supabase MCP (`apply_migration`) を使い、DBに2つのmigrationを適用：
+  1. `add_gin_index_for_fulltext_search`: `documents_content_tsvector_idx` GINインデックス作成
+  2. `add_match_documents_hybrid_function`: `match_documents_hybrid` RPC関数作成
+- `execute_sql` で関数存在を確認済み
+- コード変更なし（DB migrationのみ）
+
+### 状態
+- ハイブリッド検索（ベクトル + キーワード全文検索）が本番DBで利用可能に
+- `lib/rag_chain.py` の `search_relevant_documents(use_hybrid=True)` が正常動作する状態
