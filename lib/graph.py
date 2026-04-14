@@ -85,10 +85,13 @@ def hyde_query(state: RAGState) -> dict:
     query = state.get("rewritten_query") or state["messages"][-1].content
     llm = create_llm(state.get("model_id") or DEFAULT_MODEL)
 
-    # 仮説回答を生成
-    prompt = HYDE_PROMPT.format(question=query)
-    response = llm.invoke([HumanMessage(content=prompt)])
-    hyde_answer = response.content.strip()
+    # 仮説回答を生成（API エラー時はクエリそのもので検索）
+    try:
+        prompt = HYDE_PROMPT.format(question=query)
+        response = llm.invoke([HumanMessage(content=prompt)])
+        hyde_answer = response.content.strip()
+    except Exception:
+        hyde_answer = query
 
     # 仮説回答で検索（仮説回答のEmbeddingが実際のドキュメントに近い）
     result = search_relevant_documents(hyde_answer, match_count=10)
@@ -103,12 +106,16 @@ def multi_query_expand(state: RAGState) -> dict:
     query = state.get("rewritten_query") or state["messages"][-1].content
     llm = create_llm(state.get("model_id") or DEFAULT_MODEL)
 
-    # 言い換えクエリを生成
+    # 言い換えクエリを生成（API エラー時はフォールバック）
     prompt = MULTI_QUERY_PROMPT.format(question=query)
-    response = llm.invoke([HumanMessage(content=prompt)])
-    expanded = [
-        q.strip() for q in response.content.strip().split("\n") if q.strip()
-    ][:3]  # 最大3つ
+    try:
+        response = llm.invoke([HumanMessage(content=prompt)])
+        expanded = [
+            q.strip() for q in response.content.strip().split("\n") if q.strip()
+        ][:3]  # 最大3つ
+    except Exception:
+        # API レートリミット等で失敗した場合、元のクエリのみで検索
+        expanded = [query]
 
     # 各クエリで検索
     all_sources: list[Source] = []
