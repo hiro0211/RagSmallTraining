@@ -17,8 +17,9 @@ def clear_lru_caches():
     yield
     from lib.llm import create_llm
     from lib.graph import get_compiled_graph
-    from lib.rag_chain import _get_embeddings
+    from lib.rag_chain import _get_embeddings, _get_cross_encoder
 
     create_llm.cache_clear()
     get_compiled_graph.cache_clear()
     _get_embeddings.cache_clear()
+    _get_cross_encoder.cache_clear()

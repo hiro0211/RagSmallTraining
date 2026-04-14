@@ -1,4 +1,4 @@
-"""RAG search logic: embed query, search Supabase, build prompt."""
+"""RAG検索ロジック: Embedding、Supabase検索、Reranking、プロンプト構築."""
 
 from dataclasses import dataclass
 from functools import lru_cache
@@ -35,23 +35,91 @@ class Source:
 
 @lru_cache(maxsize=1)
 def _get_embeddings():
-    """Return a cached OpenAIEmbeddings instance."""
+    """キャッシュ済みの OpenAIEmbeddings インスタンスを返す."""
     return OpenAIEmbeddings(model="text-embedding-3-small")
+
+
+@lru_cache(maxsize=1)
+def _get_cross_encoder():
+    """キャッシュ済みの Cross-Encoder モデルインスタンスを返す."""
+    from sentence_transformers import CrossEncoder
+    return CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+
+
+def rerank_documents(
+    question: str,
+    sources: list[Source],
+    top_k: int = 5,
+) -> list[Source]:
+    """Cross-Encoder で検索結果を再スコアリングし、上位 top_k 件を返す.
+
+    Args:
+        question: ユーザーのクエリ（リライト後）
+        sources: 初回検索で取得した Source リスト
+        top_k: Reranking 後に返す件数
+
+    Returns:
+        再スコアリング後の上位 top_k 件の Source リスト
+    """
+    if not sources or len(sources) <= top_k:
+        return sources
+
+    model = _get_cross_encoder()
+
+    # Cross-Encoder はクエリとドキュメントのペアを入力として受け取る
+    pairs = [[question, src.content] for src in sources]
+    scores = model.predict(pairs)
+
+    # スコアでソートし、上位 top_k 件を返す
+    scored_sources = list(zip(scores, sources))
+    scored_sources.sort(key=lambda x: x[0], reverse=True)
+
+    return [
+        Source(
+            content=src.content,
+            metadata=src.metadata,
+            similarity=float(score),  # Reranking スコアで上書き
+        )
+        for score, src in scored_sources[:top_k]
+    ]
 
 
 def search_relevant_documents(
     question: str,
     match_threshold: float = 0.3,
-    match_count: int = 5,
+    match_count: int = 10,
     use_hybrid: bool = True,
+    metadata_filter: dict | None = None,
 ) -> dict:
-    """Search for relevant documents using vector similarity or hybrid search."""
+    """ハイブリッド検索でドキュメントを取得する.
+
+    Args:
+        question: 検索クエリ
+        match_threshold: 類似度の閾値
+        match_count: 取得件数（Reranking 前の候補数）
+        use_hybrid: ハイブリッド検索を使用するか
+        metadata_filter: メタデータフィルタ条件（Phase 5 で使用）
+    """
     embeddings = _get_embeddings()
     query_embedding = embeddings.embed_query(question)
 
     supabase = get_supabase_admin()
 
-    if use_hybrid:
+    # メタデータフィルタ付きハイブリッド検索
+    if use_hybrid and metadata_filter:
+        result = (
+            supabase.rpc(
+                "match_documents_hybrid_filtered",
+                {
+                    "query_embedding": query_embedding,
+                    "query_text": question,
+                    "match_threshold": match_threshold,
+                    "match_count": match_count,
+                    "metadata_filter": metadata_filter,
+                },
+            ).execute()
+        )
+    elif use_hybrid:
         result = (
             supabase.rpc(
                 "match_documents_hybrid",
@@ -77,17 +145,9 @@ def search_relevant_documents(
 
     docs = result.data or []
 
-    context_parts = []
     sources = []
-    for i, doc in enumerate(docs, 1):
+    for doc in docs:
         metadata = doc.get("metadata", {})
-        source_name = metadata.get("source", "不明")
-        section_name = metadata.get("section", "")
-        label = f"[出典{i}: {source_name}"
-        if section_name:
-            label += f" - {section_name}"
-        label += "]"
-        context_parts.append(f"{label}\n{doc['content']}")
         sources.append(
             Source(
                 content=doc["content"],
@@ -96,14 +156,27 @@ def search_relevant_documents(
             )
         )
 
-    context = "\n\n---\n\n".join(context_parts)
-    return {"context": context, "sources": sources}
+    return {"sources": sources}
+
+
+def format_sources_as_context(sources: list[Source]) -> str:
+    """Source リストを出典ラベル付きコンテキスト文字列に整形する."""
+    context_parts = []
+    for i, src in enumerate(sources, 1):
+        source_name = src.metadata.get("source", "不明")
+        section_name = src.metadata.get("section", "")
+        label = f"[出典{i}: {source_name}"
+        if section_name:
+            label += f" - {section_name}"
+        label += "]"
+        context_parts.append(f"{label}\n{src.content}")
+    return "\n\n---\n\n".join(context_parts)
 
 
 def build_rag_prompt(
     question: str, context: str
 ) -> list[dict[str, str]]:
-    """Build chat messages with RAG context."""
+    """RAGコンテキスト付きのチャットメッセージを構築する."""
     system_message = RAG_SYSTEM_PROMPT.format(context=context)
     return [
         {"role": "system", "content": system_message},

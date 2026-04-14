@@ -185,3 +185,70 @@ class TestStoreInSupabase:
 
             mock_admin.return_value.table.assert_called_with("documents")
             mock_table.insert.assert_called_once()
+
+
+class TestMetadata:
+    """拡張メタデータのテスト."""
+
+    def test_load_documents_includes_extended_metadata(self, tmp_path):
+        (tmp_path / "test.md").write_text("# Title\nContent", encoding="utf-8")
+        from lib.embedding_pipeline import load_documents
+
+        docs = load_documents(str(tmp_path))
+        meta = docs[0].metadata
+
+        assert "source_type" in meta
+        assert "created_at" in meta
+        assert "category" in meta
+        assert "importance" in meta
+        assert "language" in meta
+        assert meta["source_type"] == "manual"
+        assert meta["language"] == "ja"
+
+    def test_metadata_overrides(self, tmp_path):
+        (tmp_path / "test.md").write_text("Content", encoding="utf-8")
+        from lib.embedding_pipeline import load_documents
+
+        docs = load_documents(
+            str(tmp_path),
+            metadata_overrides={"source_type": "method", "category": "営業手法"},
+        )
+        meta = docs[0].metadata
+
+        assert meta["source_type"] == "method"
+        assert meta["category"] == "営業手法"
+
+
+class TestChunkingMethod:
+    """チャンキング方式の切り替えテスト."""
+
+    def test_fixed_chunking_adds_method_metadata(self):
+        from lib.embedding_pipeline import chunk_documents
+        from langchain_core.documents import Document
+
+        doc = Document(
+            page_content="あ" * 1000,
+            metadata={"source": "test.txt", "type": "txt"},
+        )
+        chunks = chunk_documents([doc], use_semantic=False)
+
+        for chunk in chunks:
+            assert chunk.metadata.get("chunking_method") == "fixed"
+
+    def test_semantic_chunking_flag(self):
+        """use_semantic=True で短いテキストがセマンティックメタデータ付きになることを確認."""
+        pytest.importorskip("langchain_experimental")
+        from lib.embedding_pipeline import _chunk_documents_semantic
+        from langchain_core.documents import Document
+
+        # 短いテキスト（100文字未満）はそのまま1チャンクになる
+        doc = Document(
+            page_content="短いテキスト",
+            metadata={"source": "test.txt", "type": "txt"},
+        )
+
+        # _chunk_documents_semantic は短いテキストを SemanticChunker に渡さずそのまま返す
+        chunks = _chunk_documents_semantic([doc])
+
+        assert len(chunks) == 1
+        assert chunks[0].metadata.get("chunking_method") == "semantic"
